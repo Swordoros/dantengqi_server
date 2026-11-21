@@ -873,6 +873,7 @@ function finishUndo(agree) {
 /* ---------------------------------------------------------------- 结算 */
 
 function showResult() {
+  try { window.__dantengRecordWin?.(); } catch (e) { /* 记分失败不影响结算 */ }
   const st = S.state;
   const localSplit = S.mode === "local" && st.winner !== "draw";
   if (localSplit) {

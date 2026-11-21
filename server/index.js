@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 
 import { serveStatic } from "./static.js";
+import { createLeaderboard } from "./leaderboard.js";
 import { Rooms } from "./rooms.js";
 import {
   PROTOCOL_VERSION, RULES_VERSION, ERR,
@@ -27,6 +28,7 @@ import {
 
 const root = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PUBLIC = join(root, "..", "dist");
+const DEFAULT_DATA = join(root, "..", "data");
 
 const HEARTBEAT_MS = 20000;
 const MAX_PER_IP = 8;
@@ -43,14 +45,21 @@ export function startServer({
   bank = 300,
   random = Math.random,
   disconnectMs = 90000,
+  dataDir = process.env.DANTENG_DATA || DEFAULT_DATA,
   log = () => {},
 } = {}) {
   const rooms = new Rooms();
   const conns = new Set();
   const perIp = new Map();
+  const leaderboard = createLeaderboard({ dataDir, log });
 
   const server = http.createServer((req, res) => {
-    serveStatic(req, res, publicRoot).catch(() => {
+    const path = req.url || "/";
+    const task = path.startsWith("/api/")
+      ? leaderboard.handle(req, res)
+      : serveStatic(req, res, publicRoot).then(() => true);
+    task.catch(() => {
+      if (res.headersSent) return;
       res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Internal Error");
     });
@@ -673,11 +682,13 @@ export function startServer({
       const addr = server.address();
       const actual = typeof addr === "object" && addr ? addr.port : port;
       log(`监听 http://${host}:${actual}`);
+      log(`排行榜数据：${leaderboard.file}`);
       resolve({
         port: actual,
         server,
         wss,
         rooms,
+        leaderboard,
         close: () => new Promise((res) => {
           clearInterval(heartbeat);
           clearInterval(sweeper);
@@ -685,7 +696,8 @@ export function startServer({
           clearInterval(clockSync);
           for (const c of conns) { try { c.ws.terminate(); } catch { /* ignore */ } }
           for (const c of wss.clients) { try { c.terminate(); } catch { /* ignore */ } }
-          wss.close(() => {
+          wss.close(async () => {
+            try { await leaderboard.flush(); } catch { /* ignore */ }
             server.closeAllConnections?.();
             server.close(() => res());
           });

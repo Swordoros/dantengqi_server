@@ -92,7 +92,7 @@ if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
   log "创建服务账号：$SERVICE_USER"
 fi
 
-mkdir -p "$APP_DIR/server" "$APP_DIR/src" "$APP_DIR/dist"
+mkdir -p "$APP_DIR/server" "$APP_DIR/src" "$APP_DIR/dist" "$APP_DIR/data"
 cp -a "$SRC_DIR/server/." "$APP_DIR/server/"
 cp -a "$SRC_DIR/src/." "$APP_DIR/src/"
 cp -a "$SRC_DIR/dist/." "$APP_DIR/dist/"
@@ -167,6 +167,7 @@ cat <<EOF
    journalctl -u ${SERVICE_NAME} -f
    systemctl restart ${SERVICE_NAME}
 
+ 排行榜数据：${APP_DIR}/data/leaderboard.json（升级不会覆盖）
  升级：拉新代码后重新执行本脚本即可。
 ========================================
 EOF

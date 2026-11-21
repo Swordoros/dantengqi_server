@@ -1027,3 +1027,30 @@ body {
   color: var(--muted);
   cursor: not-allowed;
 }
+
+/* ---------- 本地部署功能：ID 弹窗与排行榜 ---------- */
+.dt-modal{position:fixed;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(4,8,11,.78);backdrop-filter:blur(6px)}
+.dt-modal[hidden]{display:none!important}
+.dt-card{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+.dt-card h2{margin:0 0 8px;font-size:22px}
+.dt-card p{margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.6}
+.dt-card input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:#111a20;color:var(--text);font-size:16px;outline:none}
+.dt-card input:focus{border-color:var(--p0)}
+.dt-card .dt-actions{display:flex;gap:10px;margin-top:14px}
+.dt-card .dt-actions .btn{flex:1}
+.dt-error{min-height:18px;color:var(--danger)!important;font-size:12px!important;margin:8px 0 0!important}
+.dt-hint{font-size:11px!important;color:#6f8493!important;margin:12px 0 0!important}
+.dt-board{margin-top:16px;border-top:1px solid var(--line);padding-top:12px;text-align:left}
+.dt-board[hidden]{display:none!important}
+.dt-board-head{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-bottom:6px}
+.dt-board-head b{color:var(--text);font-size:14px}
+.dt-board-head .dt-mine{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dt-board-head button{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:7px;padding:3px 7px;font-size:11px;cursor:pointer}
+.dt-board-scroll{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:9px}
+.dt-board table{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
+.dt-board th,.dt-board td{padding:5px 6px;border-bottom:1px solid rgba(36,51,61,.7);text-align:center;white-space:nowrap}
+.dt-board th{position:sticky;top:0;background:#141d24;color:var(--muted);font-weight:600;z-index:1}
+.dt-board th:nth-child(2),.dt-board td:nth-child(2){text-align:left;max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.dt-board tr:last-child td{border-bottom:0}
+.dt-board tr.dt-me td{background:rgba(70,211,166,.12);color:var(--text)}
+.dt-board .dt-empty{color:var(--muted);padding:12px;text-align:center}

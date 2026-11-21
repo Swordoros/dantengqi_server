@@ -51,11 +51,32 @@ http://<服务器公网IP>:6657/?play=async     同时行动模式
 ## 验证
 
 ```bash
-curl http://127.0.0.1:6657/health      # {"ok":true}
-curl -I http://127.0.0.1:6657/         # 200，返回页面
+curl http://127.0.0.1:6657/health            # {"ok":true}
+curl http://127.0.0.1:6657/api/health        # {"ok":true}
+curl http://127.0.0.1:6657/api/leaderboard   # {"players":[...]}
+curl -I http://127.0.0.1:6657/               # 200，返回页面
 ```
 
 然后用两个浏览器窗口：一个「创建房间」拿 6 位房间码，另一个「加入房间」。
+
+## 排行榜（本地新增）
+
+页面首次进入会要一个 ID，只用来记「你在各 AI 难度下赢过几局」。这是本仓库相对上游新增的功能，
+独立单文件版（没有服务端）打开时会自动隐藏，行为与上游一致。
+
+| 接口 | 用途 |
+|---|---|
+| `GET /api/health` | 健康检查 |
+| `POST /api/players` | 首次进入 / 换 ID，body `{"id":"wwh"}` |
+| `POST /api/wins` | 记一胜，body `{"player_id":"wwh","difficulty":"hard"}` |
+| `GET /api/leaderboard?limit=20` | 按总胜场降序 |
+
+`difficulty` 只能是 `easy / normal / hard / master / grandmaster / hell`。
+只记**人机对局里玩家获胜**，本地双人、联机、平局、认输都不记；没有服务端棋局校验，防不了作弊。
+
+- 数据文件：`/opt/danteng/data/leaderboard.json`（可用环境变量 `DANTENG_DATA` 换目录）；
+- 进程启动时读进内存，**手改文件后要重启服务**；
+- 升级不会覆盖 `data/`。
 
 ## 常用运维
 
@@ -105,6 +126,8 @@ sudo userdel danteng 2>/dev/null || true
 | 服务起不来 | `journalctl -u danteng -n 50`；多半是 Node 版本过低或端口被占 |
 | 端口被占 | `ss -lntp | grep 6657`，换 `PORT` 重装 |
 | 联机提示版本不一致 | 双方刷新页面；客户端与服务器版本不同（`PROTOCOL_VERSION` / `RULES_VERSION`） |
+| 排行榜一直是空的 | 是否填了 ID；`curl 127.0.0.1:6657/api/leaderboard` 看接口；`ls -l data/leaderboard.json` 看权限 |
+| 改了排行榜数据没变 | 改完要 `systemctl restart danteng` |
 | 连接频繁断开 | 检查云厂商是否对长连接有超时策略 |
 
 ## 端口与安全
@@ -117,8 +140,9 @@ sudo userdel danteng 2>/dev/null || true
 
 ```
 /opt/danteng/
-  server/     服务端代码（index.js / rooms.js / game.js / async-game.js / protocol.js / static.js）
+  server/     服务端代码（index.js / rooms.js / game.js / async-game.js / protocol.js / static.js / leaderboard.js）
   src/        规则引擎（服务端与客户端共用同一份）
   dist/       打包好的页面（静态托管）
+  data/       排行榜数据（leaderboard.json，升级不覆盖）
 systemd: /etc/systemd/system/danteng.service
 ```

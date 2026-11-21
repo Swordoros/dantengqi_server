@@ -97,6 +97,9 @@ export const AI = {
   normal: greedyAI,
   hard: hardAI,
   master: masterAI,
+  // 异步模式没有单独的地狱/宗师引擎，与大师同档（否则选这两档会拿不到 AI 而报错）
+  hell: masterAI,
+  grandmaster: masterAI,
 };
 
 export function createMasterAI() {

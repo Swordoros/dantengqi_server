@@ -7,6 +7,22 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+
+  <!-- 首次进入：排行榜用的 ID（仅在服务器版可用，独立单文件版会自动隐藏） -->
+  <div class="dt-modal" id="dtIdentity" role="dialog" aria-modal="true" aria-labelledby="dtIdentityTitle" hidden>
+    <div class="dt-card">
+      <h2 id="dtIdentityTitle">先留个 ID</h2>
+      <p>只用来记排行榜：你在不同 AI 难度下赢过几局。下次进来会自动带上。</p>
+      <input id="dtIdentityInput" maxlength="24" placeholder="例如：wwh" autocomplete="nickname" spellcheck="false" />
+      <p class="dt-error" id="dtIdentityError"></p>
+      <div class="dt-actions">
+        <button class="btn ghost" id="dtIdentitySkip" type="button">先玩</button>
+        <button class="btn primary" id="dtIdentityGo" type="button">进入</button>
+      </div>
+      <p class="dt-hint">之后可以在首页排行榜旁换 ID。不同 ID 的胜场分开记。</p>
+    </div>
+  </div>
+
   <div class="app">
     <header class="topbar">
       <div class="brand">蛋疼棋<span class="ver">v1.0</span></div>
@@ -116,6 +132,23 @@
         <button class="menuItem back" id="aiBack">
           <b>返回</b>
         </button>
+      </div>
+
+      <div class="dt-board" id="dtLeaderboard" hidden>
+        <div class="dt-board-head">
+          <b>排行榜</b>
+          <span class="dt-mine" id="dtMine"></span>
+          <button id="dtRefresh" type="button">刷新</button>
+          <button id="dtChangeId" type="button">换 ID</button>
+        </div>
+        <div class="dt-board-scroll">
+          <table>
+            <thead>
+              <tr><th>#</th><th>ID</th><th>简单</th><th>普通</th><th>困难</th><th>大师</th><th>宗师</th><th>地狱</th><th>总胜场</th></tr>
+            </thead>
+            <tbody id="dtBoardBody"><tr><td class="dt-empty" colspan="9">正在读取排行榜…</td></tr></tbody>
+          </table>
+        </div>
       </div>
 
       <p class="fine" id="homeFine">每步 30 秒 · 时间库 300 秒 · 悔棋 3 次</p>
@@ -358,5 +391,170 @@
   </div>
 
   <script type="module" src="./loader.js"></script>
+
+  <script>
+  /* ===== 本地部署功能：玩家 ID、胜场上报与排行榜 =====
+   * 只在有服务端（/api/health 可用）时启用；独立单文件版会自动隐藏，
+   * 行为与上游一致。数据由 server/leaderboard.js 保存在 data/leaderboard.json。
+   */
+  (function () {
+    const KEY = "danteng.playerId";
+    const LEVELS = ["easy", "normal", "hard", "master", "grandmaster", "hell"];
+    const COLUMNS = 9;
+    const identity = document.getElementById("dtIdentity");
+    const board = document.getElementById("dtLeaderboard");
+    const input = document.getElementById("dtIdentityInput");
+    const go = document.getElementById("dtIdentityGo");
+    const skip = document.getElementById("dtIdentitySkip");
+    const error = document.getElementById("dtIdentityError");
+    const mine = document.getElementById("dtMine");
+    const body = document.getElementById("dtBoardBody");
+    let playerId = localStorage.getItem(KEY) || "";
+    let available = false;
+
+    async function api(path, options) {
+      const response = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    }
+
+    async function probe() {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      try {
+        await api("/api/health", { method: "GET", signal: controller.signal });
+        return true;
+      } catch (e) {
+        return false;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function showIdentity() {
+      input.value = playerId;
+      error.textContent = "";
+      identity.hidden = false;
+      setTimeout(() => input.focus(), 0);
+    }
+
+    function emptyRow(text) {
+      body.textContent = "";
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.className = "dt-empty";
+      td.colSpan = COLUMNS;
+      td.textContent = text;
+      tr.appendChild(td);
+      body.appendChild(tr);
+    }
+
+    function setMine(row) {
+      mine.textContent = playerId
+        ? "你的 ID：" + playerId + (row ? " · 总胜场 " + row.total : "")
+        : "";
+    }
+
+    function render(data) {
+      const rows = data.players || [];
+      setMine(rows.find((row) => row.id === playerId));
+      body.textContent = "";
+      if (!rows.length) {
+        emptyRow("还没有记录，先赢一局吧。");
+        return;
+      }
+      rows.forEach((row, index) => {
+        const tr = document.createElement("tr");
+        if (row.id === playerId) tr.className = "dt-me";
+        const cells = [String(index + 1), row.id];
+        for (const level of LEVELS) cells.push(String(row[level] ?? 0));
+        cells.push(String(row.total ?? 0));
+        for (const value of cells) {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        }
+        body.appendChild(tr);
+      });
+    }
+
+    async function loadBoard() {
+      if (!available) return;
+      try {
+        render(await api("/api/leaderboard", { method: "GET" }));
+      } catch (e) {
+        emptyRow("排行榜暂时读不到。");
+      }
+    }
+
+    async function enter() {
+      const id = input.value.trim();
+      if (!id || id.length > 24 || /[\u0000-\u001f\u007f]/.test(id)) {
+        error.textContent = "ID 要 1–24 个字符，不能有控制字符。";
+        return;
+      }
+      go.disabled = true;
+      error.textContent = "";
+      try {
+        await api("/api/players", { method: "POST", body: JSON.stringify({ id }) });
+        playerId = id;
+        localStorage.setItem(KEY, id);
+        identity.hidden = true;
+        await loadBoard();
+      } catch (e) {
+        error.textContent = "连不上服务器，稍后再试。";
+      } finally {
+        go.disabled = false;
+      }
+    }
+
+    /**
+     * 一局人机结束、且人类执子的一方获胜时上报一次。
+     * 用 state 对象上的标记去重，避免 showResult 被重复调用时记两次。
+     */
+    async function recordWin() {
+      if (!available || !playerId) return;
+      const S = window.__danteng;
+      if (!S || !S.state) return;
+      if (!LEVELS.includes(S.mode)) return;
+      if (S.aiSeat === null || S.aiSeat === undefined) return;
+      const st = S.state;
+      if (st.winner !== 1 - S.aiSeat) return;
+      if (st.rankReported) return;
+      st.rankReported = true;
+      try {
+        await api("/api/wins", {
+          method: "POST",
+          body: JSON.stringify({ player_id: playerId, difficulty: S.mode }),
+        });
+        await loadBoard();
+      } catch (e) {
+        /* 记录失败不打断游戏；下一次赢了再记 */
+      }
+    }
+
+    window.__dantengRecordWin = recordWin;
+    go.addEventListener("click", enter);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") enter();
+    });
+    skip.addEventListener("click", () => { identity.hidden = true; });
+    document.getElementById("dtChangeId").addEventListener("click", showIdentity);
+    document.getElementById("dtRefresh").addEventListener("click", loadBoard);
+
+    probe().then((ok) => {
+      available = ok;
+      if (!ok) return;              // 没有服务端：整块功能隐藏，等同上游行为
+      board.hidden = false;
+      if (playerId) identity.hidden = true;
+      else showIdentity();
+      loadBoard();
+    });
+  })();
+  </script>
+
 </body>
 </html>
