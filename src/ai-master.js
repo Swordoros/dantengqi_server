@@ -10,12 +10,19 @@ import { randomAI } from "./ai-random.js";
 
 const AI2_SIZE = COLS * ROWS;
 
-function takeWin(state) {
+/**
+ * 越线结果：返回 { action, winner } 或 null。
+ * winner 可能是本方（赢）、"draw"（平）或对方。
+ * 注意：能越线不等于能赢——规则 1.3 下可能是平局。
+ */
+function exitAction(state) {
   const p = state.players[state.turn];
   if (p.r !== 0) return null;
   const t = stepTarget(state, p.c, p.r, "up");
   if (!t || !t.exit) return null;
-  return { type: "move", dir: "up" };
+  const r = applyAction(state, { type: "move", dir: "up" });
+  if (!r.ok) return null;
+  return { action: { type: "move", dir: "up" }, winner: r.state.winner };
 }
 const ai2Key = (c, r) => r * COLS + c;
 
@@ -239,6 +246,27 @@ function orderScore(state) {
   return distanceOf(state, state.turn) - distanceOf(state, 1 - state.turn);
 }
 
+/**
+ * 路由墙候选：在不增加即时距离的墙里，挑「砍掉对手最短路条数最多」的前 N 面。
+ * 只在根节点调用，避免搜索内部的高昂开销。
+ */
+function routeCutCandidates(state, n) {
+  const opp = 1 - state.turn;
+  const base = pathCount(state, opp, 24);
+  const out = [];
+  for (const w of allWallSlots()) {
+    if (wallPlaced(state, w.kind, w.c, w.r)) continue;
+    const a = { type: "wall", kind: w.kind, c: w.c, r: w.r };
+    if (!validateAction(state, a).ok) continue;
+    const r = applyAction(state, a);
+    if (!r.ok) continue;
+    const cut = base - pathCount(r.state, opp, 24);
+    if (cut > 0) out.push([cut, a]);
+  }
+  out.sort((x, y) => y[0] - x[0]);
+  return out.slice(0, n).map((x) => x[1]);
+}
+
 function searchAI(state, depth, alpha, beta, ctx) {
   ctx.nodes++;
   if ((ctx.nodes & 255) === 0 && aiNow() >= ctx.deadline) {
@@ -269,11 +297,20 @@ function searchAI(state, depth, alpha, beta, ctx) {
 
 /** 迭代加深根搜索。 */
 function rootSearch(state, rng, timeMs, maxDepth, opts = {}) {
-  const win = takeWin(state);
-  if (win) return win;
+  const ex = exitAction(state);
+  if (ex && (opts.smartExit ? ex.winner === state.turn : true)) return ex.action;
 
   const me = state.turn;
   const cands = candidatesAI(state, { scanAll: 6, ...(opts.candOpts ?? {}) });
+  if (opts.routeWalls > 0) {
+    const seen = new Set(cands.map((a) => (a.type === "move" ? "m:" + a.dir : "w:" + a.kind + ":" + a.c + ":" + a.r)));
+    for (const w of routeCutCandidates(state, opts.routeWalls)) {
+      const k = "w:" + w.kind + ":" + w.c + ":" + w.r;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      cands.push(w);
+    }
+  }
   const ordered = [];
   const startWallBias = Number(opts.startWallBias ?? 0);
   const startWallPlies = Number(opts.startWallPlies ?? 0);
@@ -301,6 +338,7 @@ function rootSearch(state, rng, timeMs, maxDepth, opts = {}) {
   };
   const repeatSet = opts.repeatSet;
   const repeatPenalty = Number(opts.repeatPenalty ?? 0);
+  const diag = opts.diag || null;
   let best = ordered[0].a;
   let bestScore = -Infinity;
 
@@ -329,9 +367,22 @@ function rootSearch(state, rng, timeMs, maxDepth, opts = {}) {
       bestScore = localScore;
       ordered.sort((x, y) => (x.a === best ? -1 : y.a === best ? 1 : y.score - x.score));
     }
-    if (bestScore >= AI_WIN * 0.9) break;
-    if (aiNow() >= ctx.deadline) break;
+    if (diag) {
+      diag.depths = depth;
+      diag.score = bestScore;
+      diag.nodes = ctx.nodes;
+      diag.stop = "depth";
+    }
+    if (bestScore >= AI_WIN * 0.9) {
+      if (diag) diag.stop = "win";
+      break;
+    }
+    if (aiNow() >= ctx.deadline) {
+      if (diag) diag.stop = "timeout";
+      break;
+    }
   }
+  if (diag && !diag.stop) diag.stop = "max-depth";
   return best;
 }
 
@@ -577,6 +628,16 @@ function planWallNetBad(state, me, w) {
 }
 
 /** 构建一个带计划层的 AI。 */
+/** 调试：返回当前局面的生成候选（供审计工具使用）。 */
+export function debugCandidates(state, opts = {}) {
+  return candidatesAI(state, { scanAll: 6, ...opts });
+}
+
+/** 调试：某方到终点最短路条数（截断）。 */
+export function debugPathCount(state, p, cap = 24) {
+  return pathCount(state, p, cap);
+}
+
 function createMasterAI({
   timeMs = 1200,
   maxDepth = 6,
@@ -594,6 +655,8 @@ function createMasterAI({
   topWallKind = "t",
   startPlan = false,
   endgameDepth = 0,
+  routeWalls = 0,
+  smartExit = false,
 } = {}) {
   let plan = null;
   let plansUsed = 0;
@@ -603,12 +666,32 @@ function createMasterAI({
   if (necessaryPathGuard) stats.necessaryMoves = 0;
 
   function choose(state, rng) {
-    const win = takeWin(state);
-    if (win) return win;
-
     const me = state.turn;
     const opp = 1 - me;
     const mePos = state.players[me];
+
+    const exit = exitAction(state);
+    const logBase = {
+      ply: state.plies,
+      turn: me,
+      first: state.firstPlayer,
+      dMe: distanceOf(state, me),
+      dOpp: distanceOf(state, opp),
+      exits: countOpenExits(state),
+    };
+    if (!smartExit) {
+      // 旧行为：能越线就立刻越线（可能是平局）
+      if (exit) {
+        stats.lastLog = { ...logBase, source: "exit", action: exit.action };
+        return exit.action;
+      }
+    }
+    if (exit && exit.winner === me) {
+      stats.lastLog = { ...logBase, source: "exit-win", action: exit.action };
+      return exit.action;
+    }
+    // 越线只能平：先记下来，搜索若找不到更好的（或会输）就回来取平
+    const safeDraw = smartExit && exit && exit.winner === "draw" ? exit.action : null;
 
     if (avoidRepeat) {
       history.push(`${mePos.r * COLS + mePos.c}:${state.wallsPlaced}`);
@@ -635,6 +718,7 @@ function createMasterAI({
           } else {
             if (step.type === "wall") stats.planWalls++;
             else stats.planMoves++;
+            stats.lastLog = { ...logBase, source: "plan", action: step };
             return step;
           }
         }
@@ -671,6 +755,7 @@ function createMasterAI({
         if (step && !(step.type === "wall" && netWalls && planWallNetBad(state, me, step))) {
           if (step.type === "wall") stats.planWalls++;
           else stats.planMoves++;
+          stats.lastLog = { ...logBase, source: "plan-new", action: step };
           return step;
         }
         plan = null;
@@ -685,23 +770,44 @@ function createMasterAI({
       Number.isFinite(dm) && Number.isFinite(dop) &&
       Math.max(dm, dop) <= 5;
     const depth = endgame ? Math.max(maxDepth, endgameDepth) : maxDepth;
+    const diag = {};
     const action = rootSearch(state, rng, timeMs, depth, {
+      diag,
       candOpts: { netWalls, topWallMinPlies, topWallKind },
       startWallBias,
       startWallPlies,
       repeatSet,
       repeatPenalty: avoidRepeat ? repeatPenalty : 0,
+      routeWalls,
+      smartExit,
     });
+    // 能越线但只是平：若搜索结果更差，退回安全平局
+    if (safeDraw && (diag.score ?? 0) < 0) {
+      stats.lastLog = {
+        ...logBase, source: "exit-draw-fallback", action: safeDraw, score: diag.score,
+      };
+      return safeDraw;
+    }
     if (necessaryPathGuard && action.type === "wall" && opponentOnNecessaryPath(state, me)) {
       const should = necessaryPathGuard === "hard" || planWallNetBad(state, me, action);
       if (should) {
         const mv = bestProgressMove(state, me);
         if (mv) {
           stats.necessaryMoves++;
+          stats.lastLog = { ...logBase, source: "guard", action: mv };
           return mv;
         }
       }
     }
+    stats.lastLog = {
+      ...logBase,
+      source: "search",
+      action,
+      depth: diag.depths,
+      score: diag.score,
+      nodes: diag.nodes,
+      stop: diag.stop,
+    };
     return action;
   }
 
@@ -715,6 +821,7 @@ function createMasterAI({
     stats.planWalls = 0;
     stats.searches = 0;
     stats.maxPlies = 0;
+    delete stats.lastLog;
     if (planMoves) stats.planMoves = 0;
     if (necessaryPathGuard) stats.necessaryMoves = 0;
   };

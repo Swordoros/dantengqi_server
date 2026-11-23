@@ -1,0 +1,107 @@
+/**
+ * RL 环境常驻服务（JSON Lines over stdio）。
+ *
+ * 请求：{ id, op, ... }
+ *   op = "mask"  { state }              → { ok, mask: [232 个 0/1] }
+ *   op = "step"  { state, action }      → { ok, state, winner, plies }
+ *   op = "legal" { state }              → { ok, count }
+ *   op = "ping"                          → { ok }
+ *
+ * 状态格式见 serializeState()。
+ */
+
+import { createInterface } from "node:readline";
+import { createState, applyAction, validateAction, distanceOf } from "../../src/rules.js";
+import { decode } from "./actions.mjs";
+
+function toState(s) {
+  const st = createState(s.firstPlayer ?? 0, { drawMode: "firstOnly" });
+  st.vWall.set(s.vWall);
+  st.hWall.set(s.hWall);
+  st.topWall.set(s.topWall);
+  st.players = s.players.map((p) => ({ c: p.c, r: p.r }));
+  st.turn = s.turn;
+  st.firstPlayer = s.firstPlayer ?? 0;
+  st.wallsPlaced = s.wallsPlaced ?? 0;
+  st.plies = s.plies ?? 0;
+  st.wallLimit = Array.isArray(s.wallLimit) ? s.wallLimit.map((v) => (Number.isFinite(v) ? v : 9999)) : [9999, 9999];
+  st.wallsUsed = Array.isArray(s.wallsUsed) ? [s.wallsUsed[0], s.wallsUsed[1]] : [0, 0];
+  st.tolerance = s.tolerance ?? 1;
+  st.drawMode = s.drawMode ?? "firstOnly";
+  st.winner = s.winner ?? null;
+  return st;
+}
+
+function serializeState(s) {
+  return {
+    vWall: Array.from(s.vWall),
+    hWall: Array.from(s.hWall),
+    topWall: Array.from(s.topWall),
+    players: s.players.map((p) => ({ c: p.c, r: p.r })),
+    turn: s.turn,
+    firstPlayer: s.firstPlayer,
+    wallsPlaced: s.wallsPlaced,
+    plies: s.plies,
+    wallLimit: s.wallLimit.map((v) => (Number.isFinite(v) ? v : 9999)),
+    wallsUsed: s.wallsUsed,
+    tolerance: s.tolerance,
+    drawMode: s.drawMode,
+    winner: s.winner,
+    dist: [distanceOf(s, 0), distanceOf(s, 1)],
+  };
+}
+
+function maskFor(state) {
+  const mask = new Array(232).fill(0);
+  let count = 0;
+  for (let i = 0; i < 232; i++) {
+    if (validateAction(state, decode(i)).ok) {
+      mask[i] = 1;
+      count++;
+    }
+  }
+  return { mask, count };
+}
+
+const rl = createInterface({ input: process.stdin, terminal: false });
+rl.on("line", (line) => {
+  if (!line.trim()) return;
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    process.stdout.write(JSON.stringify({ id: null, ok: false, error: "bad-json" }) + "\n");
+    return;
+  }
+  const respond = (obj) => process.stdout.write(JSON.stringify({ id: msg.id, ...obj }) + "\n");
+  try {
+    if (msg.op === "ping") return respond({ ok: true });
+    if (msg.op === "reset") {
+      const s = createState(msg.firstPlayer ?? 0, { drawMode: "firstOnly" });
+      return respond({ ok: true, state: serializeState(s) });
+    }
+    const state = toState(msg.state);
+    if (msg.op === "mask") {
+      const { mask, count } = maskFor(state);
+      return respond({ ok: true, mask, count });
+    }
+    if (msg.op === "legal") {
+      const { count } = maskFor(state);
+      return respond({ ok: true, count });
+    }
+    if (msg.op === "step") {
+      const action = Number.isInteger(msg.index) ? decode(msg.index) : msg.action;
+      const r = applyAction(state, action);
+      if (!r.ok) return respond({ ok: false, error: r.error });
+      return respond({
+        ok: true,
+        state: serializeState(r.state),
+        winner: r.state.winner,
+        plies: r.state.plies,
+      });
+    }
+    return respond({ ok: false, error: "unknown-op" });
+  } catch (e) {
+    return respond({ ok: false, error: String(e && e.message || e) });
+  }
+});

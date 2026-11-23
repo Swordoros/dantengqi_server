@@ -123,11 +123,14 @@
         <button class="menuItem" data-level="master">
           <b>大师</b><span id="blurbMaster">六层搜索 + 锁路计划</span>
         </button>
+        <button class="menuItem" data-level="grandmaster">
+          <b>宗师</b><span>计划会走 · 必经路保护 · 更深收官</span>
+        </button>
         <button class="menuItem" data-level="hell">
           <b>地狱</b><span>尽量用满每一步的思考时间</span>
         </button>
-        <button class="menuItem" data-level="grandmaster">
-          <b>宗师</b><span>计划会走 · 必经路保护 · 更深收官</span>
+        <button class="menuItem" data-level="experiment">
+          <b>实验（实验中）</b><span>强化学习策略，棋力很弱，仅供体验</span>
         </button>
         <button class="menuItem back" id="aiBack">
           <b>返回</b>
@@ -144,9 +147,9 @@
         <div class="dt-board-scroll">
           <table>
             <thead>
-              <tr><th>#</th><th>ID</th><th>简单</th><th>普通</th><th>困难</th><th>大师</th><th>宗师</th><th>地狱</th><th>总胜场</th></tr>
+              <tr><th>#</th><th>ID</th><th>简单</th><th>普通</th><th>困难</th><th>大师</th><th>宗师</th><th>地狱</th><th>实验</th><th>总胜场</th></tr>
             </thead>
-            <tbody id="dtBoardBody"><tr><td class="dt-empty" colspan="9">正在读取排行榜…</td></tr></tbody>
+            <tbody id="dtBoardBody"><tr><td class="dt-empty" colspan="10">正在读取排行榜…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -399,8 +402,8 @@
    */
   (function () {
     const KEY = "danteng.playerId";
-    const LEVELS = ["easy", "normal", "hard", "master", "grandmaster", "hell"];
-    const COLUMNS = 9;
+    const LEVELS = ["easy", "normal", "hard", "master", "grandmaster", "hell", "experiment"];
+    const COLUMNS = 10;
     const identity = document.getElementById("dtIdentity");
     const board = document.getElementById("dtLeaderboard");
     const input = document.getElementById("dtIdentityInput");

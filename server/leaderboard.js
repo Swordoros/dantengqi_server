@@ -13,7 +13,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** 页面能上报的难度，顺序即排行榜列顺序（与首页 AI 菜单一致）。 */
-export const LEVELS = ["easy", "normal", "hard", "master", "grandmaster", "hell"];
+export const LEVELS = ["easy", "normal", "hard", "master", "grandmaster", "hell", "experiment"];
 
 const ID_MAX = 24;
 const LIMIT_DEFAULT = 20;
